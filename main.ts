@@ -59,6 +59,18 @@ class Tree {
   get(p: string): string | null {
     return this.now.has(p) ? this.now.get(p)! : this.original(p);
   }
+  /** True when the path exists in the tree as edited: a file an edit created or changed, or anything
+   * on disk at that path (a file or a directory) that no edit has touched. A directory counts as
+   * existing, so creating a file where one stands is `exists` instead of a crash in the write phase. */
+  exists(p: string): boolean {
+    if (this.now.has(p)) return this.now.get(p) !== null;
+    try {
+      statSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 type Edit = (tree: Tree) => void;
@@ -405,7 +417,7 @@ function unifiedSectionEdit(sec: Section, strict: boolean): Edit {
     const isMove = !isCreate && !isDelete && oldP !== null && newP !== null && oldP !== newP;
     if (isCreate) {
       const np = newP!;
-      if (tree.get(np) !== null) throw new Fail('exists', np);
+      if (tree.exists(np)) throw new Fail('exists', np);
       const plus: string[] = [];
       for (const h of sec.hunks) {
         for (const bl of h.body) {
@@ -428,7 +440,7 @@ function unifiedSectionEdit(sec: Section, strict: boolean): Edit {
       const op = oldP!;
       const np = newP!;
       if (tree.get(op) === null) throw new Fail('missing', op);
-      if (tree.get(np) !== null) throw new Fail('exists', np);
+      if (tree.exists(np)) throw new Fail('exists', np);
       const out = applyHunks(tree.get(op)!, sec.hunks, strict, op);
       tree.now.set(np, out);
       tree.now.set(op, null);
@@ -489,7 +501,7 @@ function srEdit(path: string, oldLines: string[], newLines: string[], strict: bo
   return (tree) => {
     if (!safe(path)) throw new Fail('unsafe', path);
     if (oldLines.length === 0) {
-      if (tree.get(path) !== null) throw new Fail('exists', path);
+      if (tree.exists(path)) throw new Fail('exists', path);
       tree.now.set(path, newLines.length === 0 ? '' : `${newLines.join('\n')}\n`);
       return;
     }
@@ -567,7 +579,7 @@ function parseV4AUpdate(lines: string[], start: number, end: number, updateLine:
 function v4aAddEdit(path: string, fileLines: string[]): Edit {
   return (tree) => {
     if (!safe(path)) throw new Fail('unsafe', path);
-    if (tree.get(path) !== null) throw new Fail('exists', path);
+    if (tree.exists(path)) throw new Fail('exists', path);
     tree.now.set(path, fileLines.length === 0 ? '' : `${fileLines.join('\n')}\n`);
   };
 }
@@ -586,7 +598,7 @@ function v4aUpdateEdit(path: string, moveTo: string | null, chunks: VChunk[], st
     if (moveTo !== null && !safe(moveTo)) throw new Fail('unsafe', moveTo);
     const text = tree.get(path);
     if (text === null) throw new Fail('missing', path);
-    if (moveTo !== null && tree.get(moveTo) !== null) throw new Fail('exists', moveTo);
+    if (moveTo !== null && tree.exists(moveTo)) throw new Fail('exists', moveTo);
     let doc = splitFile(text);
     let cursor = 0;
     for (const chunk of chunks) {
@@ -699,7 +711,7 @@ function jsonEdit(v: unknown): Edit | null {
     const text = o.file_text;
     return (tree) => {
       if (!safe(p)) throw new Fail('unsafe', p);
-      if (tree.get(p) !== null) throw new Fail('exists', p);
+      if (tree.exists(p)) throw new Fail('exists', p);
       tree.now.set(p, text);
     };
   }
